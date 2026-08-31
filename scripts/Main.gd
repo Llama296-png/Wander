@@ -155,7 +155,8 @@ func _on_game_over(depth_reached: int, score: int, xp_earned: int) -> void:
 
 
 func _on_restart() -> void:
-	game_over_ui.queue_free()
+	if is_instance_valid(game_over_ui):
+		game_over_ui.queue_free()
 	if is_instance_valid(hud):
 		hud.queue_free()
 	for coord in rooms.keys():

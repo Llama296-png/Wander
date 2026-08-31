@@ -27,6 +27,8 @@ var _attack_anim_timer: float = 0.0
 var _alive: bool = true
 
 var sprite: AnimatedSprite2D
+var weapon: Sprite2D
+var _charge_glow: Sprite2D
 
 
 func _ready() -> void:
@@ -40,6 +42,20 @@ func _ready() -> void:
 	s.scale = Vector2(1.5, 1.5)
 	add_child(s)
 	sprite = s
+
+	var w := Sprite2D.new()
+	w.texture = load("res://assets/sprites/weapon_%s.png" % stats.anim_prefix)
+	w.scale = Vector2(1.5, 1.5)
+	add_child(w)
+	weapon = w
+
+	if stats.attack_type == "ranged":
+		var glow := Sprite2D.new()
+		glow.texture = load(stats.projectile_sprite)
+		glow.scale = Vector2.ZERO
+		glow.position = Vector2(10, 0)
+		weapon.add_child(glow)
+		_charge_glow = glow
 
 	var shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()
@@ -83,10 +99,12 @@ func _physics_process(delta: float) -> void:
 
 	if input_vec.length() > 0.1:
 		facing = input_vec.normalized()
+	# Body stays upright and turns to face the movement direction only.
+	sprite.rotation = facing.angle()
 
-	# The character (and its weapon) always faces the mouse cursor.
+	# Only the weapon tracks the mouse cursor.
 	var aim := _aim_dir()
-	sprite.rotation = aim.angle()
+	weapon.rotation = aim.angle()
 
 	_attack_cd = max(0.0, _attack_cd - delta)
 	_ability_cd = max(0.0, _ability_cd - delta)
@@ -117,6 +135,18 @@ func _aim_dir() -> Vector2:
 func _play_attack_anim() -> void:
 	sprite.play("attack")
 	_attack_anim_timer = ATTACK_ANIM_TIME
+
+	var base_scale := Vector2(1.5, 1.5)
+	weapon.scale = base_scale
+	var tw := create_tween()
+	tw.tween_property(weapon, "scale", base_scale * 1.25, ATTACK_ANIM_TIME * 0.35)
+	tw.tween_property(weapon, "scale", base_scale, ATTACK_ANIM_TIME * 0.65)
+
+	if _charge_glow:
+		_charge_glow.scale = Vector2.ZERO
+		var gtw := create_tween()
+		gtw.tween_property(_charge_glow, "scale", Vector2.ONE, ATTACK_ANIM_TIME * 0.7)
+		gtw.tween_property(_charge_glow, "scale", Vector2.ZERO, ATTACK_ANIM_TIME * 0.3)
 
 
 func _do_attack() -> void:
@@ -197,6 +227,7 @@ func die() -> void:
 	_alive = false
 	set_physics_process(false)
 	sprite.play("death")
+	weapon.visible = false
 	died.emit()
 	await sprite.animation_finished
 	GameManager.report_game_over()

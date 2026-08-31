@@ -7,9 +7,14 @@ Run with `python3 gen_art.py` from anywhere; writes PNGs into
 ../assets/sprites relative to this file. Kept in the repo so the art can be
 regenerated or tweaked later without hand-editing pixels.
 
-Convention: every actor frame is authored FACING RIGHT at rest (weapon/head
-leading on the +X side). In-game the whole sprite is rotated to face the
-mouse cursor, so `rotation = 0` must already read as "facing right".
+Convention: every actor frame is authored FACING RIGHT at rest (head/limbs
+leading on the +X side), so `rotation = 0` must already read as "facing
+right". In-game, enemy and skeleton bodies rotate as a whole (toward their
+movement/target direction). Player/ally bodies instead stay weaponless
+(draw_weapon=False) and rotate toward their movement direction only; the
+matching weapon_<prefix>.png (grip fixed at its own canvas center) is a
+separate node that rotates independently -- toward the mouse for the
+player, toward the attack target for allies -- so only the weapon aims.
 """
 import math
 import os
@@ -49,10 +54,13 @@ def fade(img, alpha_mult):
 # ---------------------------------------------------------------------------
 
 def humanoid(body, skin, accent, weapon, *, leg=0, arm_deg=20, bob=0,
-             cast_glow=0.0, bone=False):
+             cast_glow=0.0, bone=False, draw_weapon=True):
     """leg: -3..3 stride offset. arm_deg: weapon angle, 0=pointing right,
     positive rotates it upward. bob: vertical body offset (breathing/step).
-    cast_glow: 0..1, draws a growing orb at the weapon tip for casters."""
+    cast_glow: 0..1, draws a growing orb at the weapon tip for casters.
+    draw_weapon: False omits the held item itself (blade/orb/cross) and the
+    cast glow, keeping just the arm/hand -- used for player/ally bodies,
+    which get a separately-rotating weapon layer instead (see weapon_icon)."""
     img = actor_canvas()
     d = ImageDraw.Draw(img)
     leg_color = skin if bone else tuple(max(0, c - 25) for c in body[:3]) + (255,)
@@ -88,50 +96,77 @@ def humanoid(body, skin, accent, weapon, *, leg=0, arm_deg=20, bob=0,
     tip = (shoulder[0] + length * math.cos(rad), shoulder[1] + length * math.sin(rad))
     d.ellipse([shoulder[0] - 2, shoulder[1] - 2, shoulder[0] + 2, shoulder[1] + 2], fill=skin, outline=OUTLINE)
     d.line([shoulder, tip], fill=(72, 54, 46, 255), width=3)
-    if weapon == "sword":
-        blade = (shoulder[0] + (length + 4) * math.cos(rad), shoulder[1] + (length + 4) * math.sin(rad))
-        d.line([tip, blade], fill=(215, 215, 225, 255), width=2)
-        d.line([tip, blade], fill=(240, 240, 248, 255), width=1)
-        d.ellipse([tip[0] - 1.5, tip[1] - 1.5, tip[0] + 1.5, tip[1] + 1.5], fill=accent, outline=OUTLINE)
-    elif weapon == "staff":
-        d.ellipse([tip[0] - 2.5, tip[1] - 2.5, tip[0] + 2.5, tip[1] + 2.5], fill=accent, outline=OUTLINE)
-        d.ellipse([tip[0] - 1, tip[1] - 1, tip[0] + 1, tip[1] + 1], fill=(255, 255, 255, 180))
-    elif weapon == "symbol":
-        d.line([(tip[0] - 3, tip[1]), (tip[0] + 3, tip[1])], fill=accent, width=2)
-        d.line([(tip[0], tip[1] - 3), (tip[0], tip[1] + 3)], fill=accent, width=2)
+    if draw_weapon:
+        if weapon == "sword":
+            blade = (shoulder[0] + (length + 4) * math.cos(rad), shoulder[1] + (length + 4) * math.sin(rad))
+            d.line([tip, blade], fill=(215, 215, 225, 255), width=2)
+            d.line([tip, blade], fill=(240, 240, 248, 255), width=1)
+            d.ellipse([tip[0] - 1.5, tip[1] - 1.5, tip[0] + 1.5, tip[1] + 1.5], fill=accent, outline=OUTLINE)
+        elif weapon == "staff":
+            d.ellipse([tip[0] - 2.5, tip[1] - 2.5, tip[0] + 2.5, tip[1] + 2.5], fill=accent, outline=OUTLINE)
+            d.ellipse([tip[0] - 1, tip[1] - 1, tip[0] + 1, tip[1] + 1], fill=(255, 255, 255, 180))
+        elif weapon == "symbol":
+            d.line([(tip[0] - 3, tip[1]), (tip[0] + 3, tip[1])], fill=accent, width=2)
+            d.line([(tip[0], tip[1] - 3), (tip[0], tip[1] + 3)], fill=accent, width=2)
 
-    if cast_glow > 0.01:
-        r = 1.0 + 3.0 * cast_glow
-        d.ellipse([tip[0] - r, tip[1] - r, tip[0] + r, tip[1] + r],
-                   fill=(accent[0], accent[1], accent[2], int(200 * cast_glow)))
+        if cast_glow > 0.01:
+            r = 1.0 + 3.0 * cast_glow
+            d.ellipse([tip[0] - r, tip[1] - r, tip[0] + r, tip[1] + r],
+                       fill=(accent[0], accent[1], accent[2], int(200 * cast_glow)))
 
     return img
 
 
-def humanoid_set(prefix, body, skin, accent, weapon, ranged, bone=False):
+WEAPON_CANVAS = 20
+
+
+def weapon_icon(accent, weapon_kind):
+    """A standalone held-item icon (no body), grip fixed at the canvas
+    center so rotating the Sprite2D in-game pivots around the hand."""
+    img = Image.new("RGBA", (WEAPON_CANVAS, WEAPON_CANVAS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    grip = (WEAPON_CANVAS / 2.0, WEAPON_CANVAS / 2.0)
+    length = {"sword": 6, "staff": 7, "symbol": 5}.get(weapon_kind, 5)
+    tip = (grip[0] + length, grip[1])
+    d.line([grip, tip], fill=(72, 54, 46, 255), width=3)
+    if weapon_kind == "sword":
+        blade = (grip[0] + length + 4, grip[1])
+        d.line([tip, blade], fill=(215, 215, 225, 255), width=2)
+        d.line([tip, blade], fill=(240, 240, 248, 255), width=1)
+        d.ellipse([tip[0] - 1.5, tip[1] - 1.5, tip[0] + 1.5, tip[1] + 1.5], fill=accent, outline=OUTLINE)
+    elif weapon_kind == "staff":
+        d.ellipse([tip[0] - 2.5, tip[1] - 2.5, tip[0] + 2.5, tip[1] + 2.5], fill=accent, outline=OUTLINE)
+        d.ellipse([tip[0] - 1, tip[1] - 1, tip[0] + 1, tip[1] + 1], fill=(255, 255, 255, 180))
+    elif weapon_kind == "symbol":
+        d.line([(tip[0] - 3, tip[1]), (tip[0] + 3, tip[1])], fill=accent, width=2)
+        d.line([(tip[0], tip[1] - 3), (tip[0], tip[1] + 3)], fill=accent, width=2)
+    return img
+
+
+def humanoid_set(prefix, body, skin, accent, weapon, ranged, bone=False, draw_weapon=True):
     idle = [
-        humanoid(body, skin, accent, weapon, bob=0, arm_deg=15, bone=bone),
-        humanoid(body, skin, accent, weapon, bob=-1, arm_deg=18, bone=bone),
+        humanoid(body, skin, accent, weapon, bob=0, arm_deg=15, bone=bone, draw_weapon=draw_weapon),
+        humanoid(body, skin, accent, weapon, bob=-1, arm_deg=18, bone=bone, draw_weapon=draw_weapon),
     ]
     walk = [
-        humanoid(body, skin, accent, weapon, leg=3, bob=0, arm_deg=10, bone=bone),
-        humanoid(body, skin, accent, weapon, leg=0, bob=-1, arm_deg=15, bone=bone),
-        humanoid(body, skin, accent, weapon, leg=-3, bob=0, arm_deg=10, bone=bone),
-        humanoid(body, skin, accent, weapon, leg=0, bob=-1, arm_deg=15, bone=bone),
+        humanoid(body, skin, accent, weapon, leg=3, bob=0, arm_deg=10, bone=bone, draw_weapon=draw_weapon),
+        humanoid(body, skin, accent, weapon, leg=0, bob=-1, arm_deg=15, bone=bone, draw_weapon=draw_weapon),
+        humanoid(body, skin, accent, weapon, leg=-3, bob=0, arm_deg=10, bone=bone, draw_weapon=draw_weapon),
+        humanoid(body, skin, accent, weapon, leg=0, bob=-1, arm_deg=15, bone=bone, draw_weapon=draw_weapon),
     ]
     if ranged:
         attack = [
-            humanoid(body, skin, accent, weapon, arm_deg=35, cast_glow=0.2, bone=bone),
-            humanoid(body, skin, accent, weapon, arm_deg=25, cast_glow=0.6, bone=bone),
-            humanoid(body, skin, accent, weapon, arm_deg=15, cast_glow=1.0, bone=bone),
+            humanoid(body, skin, accent, weapon, arm_deg=35, cast_glow=0.2, bone=bone, draw_weapon=draw_weapon),
+            humanoid(body, skin, accent, weapon, arm_deg=25, cast_glow=0.6, bone=bone, draw_weapon=draw_weapon),
+            humanoid(body, skin, accent, weapon, arm_deg=15, cast_glow=1.0, bone=bone, draw_weapon=draw_weapon),
         ]
     else:
         attack = [
-            humanoid(body, skin, accent, weapon, arm_deg=60, bone=bone),
-            humanoid(body, skin, accent, weapon, arm_deg=-30, bone=bone),
-            humanoid(body, skin, accent, weapon, arm_deg=15, bone=bone),
+            humanoid(body, skin, accent, weapon, arm_deg=60, bone=bone, draw_weapon=draw_weapon),
+            humanoid(body, skin, accent, weapon, arm_deg=-30, bone=bone, draw_weapon=draw_weapon),
+            humanoid(body, skin, accent, weapon, arm_deg=15, bone=bone, draw_weapon=draw_weapon),
         ]
-    base_death = humanoid(body, skin, accent, weapon, arm_deg=15, bone=bone)
+    base_death = humanoid(body, skin, accent, weapon, arm_deg=15, bone=bone, draw_weapon=draw_weapon)
     death = death_frames(base_death)
 
     for i, f in enumerate(idle):
@@ -425,14 +460,23 @@ def gen_themes():
 
 # ---------------------------------------------------------------------------
 
-def main():
-    humanoid_set("player_warrior", (90, 110, 200, 255), (235, 200, 165, 255), (210, 210, 220, 255), "sword", ranged=False)
-    humanoid_set("player_mage", (150, 70, 200, 255), (235, 200, 165, 255), (90, 220, 230, 255), "staff", ranged=True)
-    humanoid_set("player_priest", (235, 225, 200, 255), (235, 200, 165, 255), (255, 210, 90, 255), "symbol", ranged=True)
+# Player/ally class specs: (prefix, body, skin, accent, weapon_kind, ranged).
+# Shared between humanoid_set() (the body, weaponless) and weapon_icon()
+# (the separately-rotating held item), so the two stay in sync.
+CLASS_SPECS = [
+    ("player_warrior", (90, 110, 200, 255), (235, 200, 165, 255), (210, 210, 220, 255), "sword", False),
+    ("player_mage", (150, 70, 200, 255), (235, 200, 165, 255), (90, 220, 230, 255), "staff", True),
+    ("player_priest", (235, 225, 200, 255), (235, 200, 165, 255), (255, 210, 90, 255), "symbol", True),
+    ("ally_warrior", (70, 90, 160, 255), (225, 190, 155, 255), (180, 180, 190, 255), "sword", False),
+    ("ally_mage", (120, 55, 160, 255), (225, 190, 155, 255), (70, 190, 200, 255), "staff", True),
+    ("ally_priest", (205, 195, 175, 255), (225, 190, 155, 255), (225, 180, 70, 255), "symbol", True),
+]
 
-    humanoid_set("ally_warrior", (70, 90, 160, 255), (225, 190, 155, 255), (180, 180, 190, 255), "sword", ranged=False)
-    humanoid_set("ally_mage", (120, 55, 160, 255), (225, 190, 155, 255), (70, 190, 200, 255), "staff", ranged=True)
-    humanoid_set("ally_priest", (205, 195, 175, 255), (225, 190, 155, 255), (225, 180, 70, 255), "symbol", ranged=True)
+
+def main():
+    for prefix, body, skin, accent, weapon_kind, ranged in CLASS_SPECS:
+        humanoid_set(prefix, body, skin, accent, weapon_kind, ranged=ranged, draw_weapon=False)
+        save(weapon_icon(accent, weapon_kind), f"weapon_{prefix}.png")
 
     humanoid_set("enemy_skeleton", (232, 226, 210, 255), (232, 226, 210, 255), (200, 190, 170, 255), "sword", ranged=False, bone=True)
     slime_set()

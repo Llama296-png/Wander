@@ -34,8 +34,16 @@ var _ability_cd: float = 0.0
 var _attack_anim_timer: float = 0.0
 var _alive: bool = true
 var sprite: AnimatedSprite2D
+var weapon: Sprite2D
+var _charge_glow: Sprite2D
 var _player: Node2D
-var _facing: Vector2 = Vector2.RIGHT
+## Body rotation -- follows movement direction only.
+var _body_facing: Vector2 = Vector2.RIGHT
+## Weapon rotation -- follows the current attack target, or the body when
+## there isn't one.
+var _weapon_facing: Vector2 = Vector2.RIGHT
+var _wander_dir: Vector2 = Vector2.ZERO
+var _wander_time: float = 0.0
 
 
 func _ready() -> void:
@@ -50,6 +58,20 @@ func _ready() -> void:
 	s.scale = Vector2(1.3, 1.3)
 	add_child(s)
 	sprite = s
+
+	var w := Sprite2D.new()
+	w.texture = load("res://assets/sprites/weapon_%s.png" % stats.anim_prefix)
+	w.scale = Vector2(1.3, 1.3)
+	add_child(w)
+	weapon = w
+
+	if stats.attack_type == "ranged":
+		var glow := Sprite2D.new()
+		glow.texture = load(stats.projectile_sprite)
+		glow.scale = Vector2.ZERO
+		glow.position = Vector2(10, 0)
+		weapon.add_child(glow)
+		_charge_glow = glow
 
 	var shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()
@@ -92,29 +114,48 @@ func _physics_process(delta: float) -> void:
 	if class_id == "priest" and _ability_cd <= 0.0 and _try_heal():
 		return
 
-	var target = _find_nearest_enemy()
-	if target:
-		var to_target: Vector2 = target.global_position - global_position
-		var dist := to_target.length()
-		var atk_range: float = melee_range if stats.attack_type == "melee" else stats.get("ability_radius", 160.0)
-		if dist > atk_range * 0.85:
-			velocity = to_target.normalized() * speed
-		else:
-			velocity = Vector2.ZERO
-			_facing = to_target.normalized()
-			if _attack_cd <= 0.0:
-				_attack(target)
+	var aiming_at_target := false
+	if GameManager.pacifist_mode:
+		# Pacifist allies never fight -- they just wander the room instead
+		# of hunting enemies or sticking close to the player.
+		_wander(delta)
 	else:
-		_follow()
+		var target = _find_nearest_enemy()
+		if target:
+			var to_target: Vector2 = target.global_position - global_position
+			var dist := to_target.length()
+			var atk_range: float = melee_range if stats.attack_type == "melee" else stats.get("ability_radius", 160.0)
+			if dist > atk_range * 0.85:
+				velocity = to_target.normalized() * speed
+			else:
+				velocity = Vector2.ZERO
+				_weapon_facing = to_target.normalized()
+				aiming_at_target = true
+				if _attack_cd <= 0.0:
+					_attack(target)
+		else:
+			_follow()
 
 	if velocity.length() > 1.0:
-		_facing = velocity.normalized()
+		_body_facing = velocity.normalized()
+	if not aiming_at_target:
+		_weapon_facing = _body_facing
+
 	if _attack_anim_timer <= 0.0:
-		sprite.rotation = _facing.angle()
+		sprite.rotation = _body_facing.angle()
+		weapon.rotation = _weapon_facing.angle()
 		var state := "walk" if velocity.length() > 1.0 else "idle"
 		if sprite.animation != state:
 			sprite.play(state)
 	move_and_slide()
+
+
+func _wander(delta: float) -> void:
+	_wander_time -= delta
+	if _wander_time <= 0.0:
+		_wander_time = randf_range(0.8, 2.2)
+		_wander_dir = Vector2.RIGHT.rotated(randf() * TAU) * (0.0 if randf() < 0.3 else 1.0)
+	velocity = _wander_dir * speed * 0.5
 
 
 func _follow() -> void:
@@ -143,8 +184,10 @@ func _find_nearest_enemy():
 func _attack(target) -> void:
 	_attack_cd = attack_cooldown
 	sprite.play("attack")
-	sprite.rotation = _facing.angle()
+	sprite.rotation = _body_facing.angle()
+	weapon.rotation = _weapon_facing.angle()
 	_attack_anim_timer = ATTACK_ANIM_TIME
+	_play_weapon_flourish()
 	if stats.attack_type == "melee":
 		target.take_damage(damage, global_position)
 	else:
@@ -173,7 +216,10 @@ func _try_heal() -> bool:
 	if lowest:
 		_ability_cd = stats.ability_cooldown
 		sprite.play("attack")
+		_weapon_facing = (lowest.global_position - global_position).normalized() if lowest.global_position != global_position else _body_facing
+		weapon.rotation = _weapon_facing.angle()
 		_attack_anim_timer = ATTACK_ANIM_TIME
+		_play_weapon_flourish()
 		lowest.heal(stats.ability_heal)
 		return true
 	return false
@@ -202,12 +248,27 @@ func _flash() -> void:
 	tw.tween_property(sprite, "modulate", Color(1, 1, 1), 0.15)
 
 
+func _play_weapon_flourish() -> void:
+	var base_scale := Vector2(1.3, 1.3)
+	weapon.scale = base_scale
+	var tw := create_tween()
+	tw.tween_property(weapon, "scale", base_scale * 1.25, ATTACK_ANIM_TIME * 0.35)
+	tw.tween_property(weapon, "scale", base_scale, ATTACK_ANIM_TIME * 0.65)
+
+	if _charge_glow:
+		_charge_glow.scale = Vector2.ZERO
+		var gtw := create_tween()
+		gtw.tween_property(_charge_glow, "scale", Vector2.ONE, ATTACK_ANIM_TIME * 0.7)
+		gtw.tween_property(_charge_glow, "scale", Vector2.ZERO, ATTACK_ANIM_TIME * 0.3)
+
+
 func die() -> void:
 	if not _alive:
 		return
 	_alive = false
 	set_physics_process(false)
 	remove_from_group("ally")
+	weapon.visible = false
 	sprite.play("death")
 	# Fixed real-time delay rather than awaiting the animation -- see the
 	# matching comment in Enemy.gd::die().
