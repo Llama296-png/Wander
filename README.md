@@ -1,13 +1,14 @@
 # Wander
 
-A 2D pixel-art roguelike built in Godot 4.3. Fight through procedurally
+A 2D pixel-art roguelike built in Godot. Fight through procedurally
 generated rooms, with difficulty escalating the deeper you go.
 
 ## Running it
 
-1. Install [Godot 4.3+](https://godotengine.org/download) (the standard,
-   non-.NET build).
-2. Open Godot, choose **Import**, and select `wander/project.godot`.
+1. Install [Godot 4.7+](https://godotengine.org/download) (the standard,
+   non-.NET build). The project targets Godot 4.7 but only uses long-stable
+   Godot 4.x APIs, so it should also open fine on 4.3-4.6.
+2. Open Godot, choose **Import**, and select this repo's `project.godot`.
 3. Press **F5** (or the Play button) to run.
 
 ## How to play
