@@ -142,12 +142,19 @@ func _physics_process(delta: float) -> void:
 		_weapon_facing = _body_facing
 
 	if _attack_anim_timer <= 0.0:
-		sprite.rotation = _body_facing.angle()
-		weapon.rotation = _weapon_facing.angle()
+		_apply_facing()
 		var state := "walk" if velocity.length() > 1.0 else "idle"
 		if sprite.animation != state:
 			sprite.play(state)
 	move_and_slide()
+
+
+func _apply_facing() -> void:
+	# Body never rotates -- it stays upright and only mirrors left/right.
+	# Only the weapon rotates freely to face its target.
+	if absf(_body_facing.x) > 0.01:
+		sprite.flip_h = _body_facing.x < 0
+	weapon.rotation = _weapon_facing.angle()
 
 
 func _wander(delta: float) -> void:
@@ -184,8 +191,7 @@ func _find_nearest_enemy():
 func _attack(target) -> void:
 	_attack_cd = attack_cooldown
 	sprite.play("attack")
-	sprite.rotation = _body_facing.angle()
-	weapon.rotation = _weapon_facing.angle()
+	_apply_facing()
 	_attack_anim_timer = ATTACK_ANIM_TIME
 	_play_weapon_flourish()
 	if stats.attack_type == "melee":

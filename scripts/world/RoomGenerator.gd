@@ -46,7 +46,7 @@ static func build(coord: Vector2i, back_side: String, depth: int, allowed_extra_
 		enemy_types.append("brute")
 
 	var enemy_count := 0
-	if coord != Vector2i.ZERO:
+	if coord != Vector2i.ZERO and not pacifist_mode:
 		enemy_count = clampi(2 + int(depth / 2.0) + rng.randi_range(-1, 1), 1, 9)
 
 	var room := Room.new()

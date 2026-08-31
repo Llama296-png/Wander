@@ -99,10 +99,13 @@ func _physics_process(delta: float) -> void:
 
 	if input_vec.length() > 0.1:
 		facing = input_vec.normalized()
-	# Body stays upright and turns to face the movement direction only.
-	sprite.rotation = facing.angle()
+	# Body never rotates -- it stays upright and only mirrors left/right to
+	# match the movement direction (holding its last facing while moving
+	# purely vertically).
+	if absf(facing.x) > 0.01:
+		sprite.flip_h = facing.x < 0
 
-	# Only the weapon tracks the mouse cursor.
+	# Only the weapon rotates, tracking the mouse cursor.
 	var aim := _aim_dir()
 	weapon.rotation = aim.angle()
 
