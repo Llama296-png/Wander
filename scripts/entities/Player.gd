@@ -6,6 +6,9 @@ extends CharacterBody2D
 const ClassData = preload("res://scripts/data/ClassData.gd")
 const ItemData = preload("res://scripts/data/ItemData.gd")
 const Projectile = preload("res://scripts/entities/Projectile.gd")
+const AnimSetup = preload("res://scripts/entities/AnimSetup.gd")
+
+const ATTACK_ANIM_TIME := 0.3
 
 signal hp_changed(hp: int, max_hp: int)
 signal ability_ready_changed(ratio: float)
@@ -17,12 +20,13 @@ var hp: int
 var damage: int
 var speed: float
 
-var facing: Vector2 = Vector2.DOWN
+var facing: Vector2 = Vector2.RIGHT
 var _attack_cd: float = 0.0
 var _ability_cd: float = 0.0
+var _attack_anim_timer: float = 0.0
 var _alive: bool = true
 
-var sprite: Sprite2D
+var sprite: AnimatedSprite2D
 
 
 func _ready() -> void:
@@ -30,10 +34,10 @@ func _ready() -> void:
 	add_to_group("player")
 	stats = ClassData.get_stats(GameManager.player_class_id)
 
-	var s := Sprite2D.new()
-	s.name = "Sprite2D"
-	s.texture = load(stats.sprite_player)
-	s.scale = Vector2(2, 2)
+	var s := AnimatedSprite2D.new()
+	s.sprite_frames = AnimSetup.build(stats.anim_prefix)
+	s.play("idle")
+	s.scale = Vector2(1.5, 1.5)
 	add_child(s)
 	sprite = s
 
@@ -53,9 +57,10 @@ func _ready() -> void:
 	camera.position_smoothing_speed = 6.0
 	add_child(camera)
 
-	max_hp = stats.max_hp + GameManager.bonus_max_hp
+	var level_mult: float = SaveManager.level_stat_mult(GameManager.player_class_id)
+	max_hp = int((stats.max_hp + GameManager.bonus_max_hp) * level_mult)
 	hp = max_hp
-	damage = int(stats.damage * GameManager.bonus_damage_mult)
+	damage = int(stats.damage * GameManager.bonus_damage_mult * level_mult)
 	speed = stats.speed
 
 
@@ -79,12 +84,13 @@ func _physics_process(delta: float) -> void:
 	if input_vec.length() > 0.1:
 		facing = input_vec.normalized()
 
-	var mouse_dir := get_global_mouse_position() - global_position
-	if mouse_dir.length() > 1.0:
-		sprite.flip_h = mouse_dir.x < 0
+	# The character (and its weapon) always faces the mouse cursor.
+	var aim := _aim_dir()
+	sprite.rotation = aim.angle()
 
 	_attack_cd = max(0.0, _attack_cd - delta)
 	_ability_cd = max(0.0, _ability_cd - delta)
+	_attack_anim_timer = max(0.0, _attack_anim_timer - delta)
 	ability_ready_changed.emit(1.0 - (_ability_cd / float(stats.ability_cooldown)))
 
 	if Input.is_action_pressed("attack") and _attack_cd <= 0.0:
@@ -95,6 +101,11 @@ func _physics_process(delta: float) -> void:
 		if Input.is_action_just_pressed("use_item_%d" % (i + 1)):
 			_use_inventory_slot(i)
 
+	if _attack_anim_timer <= 0.0:
+		var state := "walk" if input_vec.length() > 0.1 else "idle"
+		if sprite.animation != state:
+			sprite.play(state)
+
 
 func _aim_dir() -> Vector2:
 	var d := get_global_mouse_position() - global_position
@@ -103,8 +114,14 @@ func _aim_dir() -> Vector2:
 	return d.normalized()
 
 
+func _play_attack_anim() -> void:
+	sprite.play("attack")
+	_attack_anim_timer = ATTACK_ANIM_TIME
+
+
 func _do_attack() -> void:
 	_attack_cd = stats.attack_cooldown
+	_play_attack_anim()
 	var aim := _aim_dir()
 	if stats.attack_type == "melee":
 		for enemy in get_tree().get_nodes_in_group("enemy"):
@@ -124,6 +141,7 @@ func _do_attack() -> void:
 
 func _do_ability() -> void:
 	_ability_cd = stats.ability_cooldown
+	_play_attack_anim()
 	match GameManager.player_class_id:
 		"priest":
 			for target in get_tree().get_nodes_in_group("player") + get_tree().get_nodes_in_group("ally"):
@@ -177,7 +195,8 @@ func die() -> void:
 	if not _alive:
 		return
 	_alive = false
-	hide()
 	set_physics_process(false)
+	sprite.play("death")
 	died.emit()
+	await sprite.animation_finished
 	GameManager.report_game_over()

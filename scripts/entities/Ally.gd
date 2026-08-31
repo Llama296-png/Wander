@@ -4,38 +4,50 @@ extends CharacterBody2D
 ## Set `class_id`, `ally_id` and `formation_offset` before `add_child()`.
 
 const ClassData = preload("res://scripts/data/ClassData.gd")
+const PersonalityData = preload("res://scripts/data/PersonalityData.gd")
 const Projectile = preload("res://scripts/entities/Projectile.gd")
+const AnimSetup = preload("res://scripts/entities/AnimSetup.gd")
 
-const AGGRO_RANGE := 220.0
-const FOLLOW_STOP_DIST := 18.0
-const HEAL_THRESHOLD := 0.6
+const BASE_AGGRO_RANGE := 220.0
+const BASE_FOLLOW_STOP_DIST := 18.0
+const BASE_HEAL_THRESHOLD := 0.6
+const ATTACK_ANIM_TIME := 0.3
 
 var class_id: String = "warrior"
 var ally_id: int = -1
 var formation_offset: Vector2 = Vector2(-30, 24)
 
 var stats: Dictionary
+var personality: Dictionary
 var max_hp: int
 var hp: int
 var damage: int
 var speed: float
 var melee_range: float
+var attack_cooldown: float
+var aggro_range: float
+var follow_stop_dist: float
+var heal_threshold: float
 
 var _attack_cd: float = 0.0
 var _ability_cd: float = 0.0
+var _attack_anim_timer: float = 0.0
 var _alive: bool = true
-var sprite: Sprite2D
+var sprite: AnimatedSprite2D
 var _player: Node2D
+var _facing: Vector2 = Vector2.RIGHT
 
 
 func _ready() -> void:
 	motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
 	add_to_group("ally")
 	stats = ClassData.ally_stats(class_id)
+	personality = PersonalityData.get_personality(_lookup_personality_id())
 
-	var s := Sprite2D.new()
-	s.texture = load(stats.sprite_ally)
-	s.scale = Vector2(1.8, 1.8)
+	var s := AnimatedSprite2D.new()
+	s.sprite_frames = AnimSetup.build(stats.anim_prefix)
+	s.play("idle")
+	s.scale = Vector2(1.3, 1.3)
 	add_child(s)
 	sprite = s
 
@@ -54,9 +66,20 @@ func _ready() -> void:
 	damage = stats.damage
 	speed = stats.speed
 	melee_range = stats.get("melee_range", 20.0)
+	attack_cooldown = stats.attack_cooldown * personality.attack_cd_mult
+	aggro_range = BASE_AGGRO_RANGE * personality.aggro_mult
+	follow_stop_dist = BASE_FOLLOW_STOP_DIST * personality.follow_mult
+	heal_threshold = BASE_HEAL_THRESHOLD * personality.heal_threshold_mult
 
 	_player = get_tree().get_first_node_in_group("player") as Node2D
 	GameManager.update_ally_hp(ally_id, hp)
+
+
+func _lookup_personality_id() -> String:
+	for entry in GameManager.party:
+		if entry.id == ally_id:
+			return entry.get("personality_id", "stoic")
+	return "stoic"
 
 
 func _physics_process(delta: float) -> void:
@@ -64,6 +87,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_attack_cd = max(0.0, _attack_cd - delta)
 	_ability_cd = max(0.0, _ability_cd - delta)
+	_attack_anim_timer = max(0.0, _attack_anim_timer - delta)
 
 	if class_id == "priest" and _ability_cd <= 0.0 and _try_heal():
 		return
@@ -77,13 +101,19 @@ func _physics_process(delta: float) -> void:
 			velocity = to_target.normalized() * speed
 		else:
 			velocity = Vector2.ZERO
+			_facing = to_target.normalized()
 			if _attack_cd <= 0.0:
 				_attack(target)
 	else:
 		_follow()
 
 	if velocity.length() > 1.0:
-		sprite.flip_h = velocity.x < 0
+		_facing = velocity.normalized()
+	if _attack_anim_timer <= 0.0:
+		sprite.rotation = _facing.angle()
+		var state := "walk" if velocity.length() > 1.0 else "idle"
+		if sprite.animation != state:
+			sprite.play(state)
 	move_and_slide()
 
 
@@ -93,7 +123,7 @@ func _follow() -> void:
 		return
 	var goal: Vector2 = _player.global_position + formation_offset
 	var to_goal: Vector2 = goal - global_position
-	if to_goal.length() > FOLLOW_STOP_DIST:
+	if to_goal.length() > follow_stop_dist:
 		velocity = to_goal.normalized() * speed
 	else:
 		velocity = Vector2.ZERO
@@ -101,7 +131,7 @@ func _follow() -> void:
 
 func _find_nearest_enemy():
 	var best = null
-	var best_dist := AGGRO_RANGE
+	var best_dist := aggro_range
 	for enemy in get_tree().get_nodes_in_group("enemy"):
 		var d: float = global_position.distance_to(enemy.global_position)
 		if d < best_dist:
@@ -111,7 +141,10 @@ func _find_nearest_enemy():
 
 
 func _attack(target) -> void:
-	_attack_cd = stats.attack_cooldown
+	_attack_cd = attack_cooldown
+	sprite.play("attack")
+	sprite.rotation = _facing.angle()
+	_attack_anim_timer = ATTACK_ANIM_TIME
 	if stats.attack_type == "melee":
 		target.take_damage(damage, global_position)
 	else:
@@ -128,7 +161,7 @@ func _attack(target) -> void:
 
 func _try_heal() -> bool:
 	var lowest = null
-	var lowest_ratio := HEAL_THRESHOLD
+	var lowest_ratio := heal_threshold
 	var candidates: Array = get_tree().get_nodes_in_group("ally") + get_tree().get_nodes_in_group("player")
 	for c in candidates:
 		if not c.has_method("heal"):
@@ -139,6 +172,8 @@ func _try_heal() -> bool:
 			lowest = c
 	if lowest:
 		_ability_cd = stats.ability_cooldown
+		sprite.play("attack")
+		_attack_anim_timer = ATTACK_ANIM_TIME
 		lowest.heal(stats.ability_heal)
 		return true
 	return false
@@ -171,5 +206,11 @@ func die() -> void:
 	if not _alive:
 		return
 	_alive = false
+	set_physics_process(false)
+	remove_from_group("ally")
+	sprite.play("death")
+	# Fixed real-time delay rather than awaiting the animation -- see the
+	# matching comment in Enemy.gd::die().
+	await get_tree().create_timer(0.4).timeout
 	GameManager.remove_ally(ally_id)
 	queue_free()

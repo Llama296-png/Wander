@@ -4,6 +4,7 @@ extends CanvasLayer
 
 const ItemData = preload("res://scripts/data/ItemData.gd")
 const ClassData = preload("res://scripts/data/ClassData.gd")
+const PersonalityData = preload("res://scripts/data/PersonalityData.gd")
 
 var player
 
@@ -61,6 +62,7 @@ func _ready() -> void:
 
 	party_box = HBoxContainer.new()
 	party_box.position = Vector2(8, 46)
+	party_box.add_theme_constant_override("separation", 3)
 	add_child(party_box)
 
 	inventory_box = HBoxContainer.new()
@@ -110,17 +112,25 @@ func _rebuild_party() -> void:
 		c.queue_free()
 	for entry in GameManager.party:
 		var stats := ClassData.get_stats(entry.class_id)
+		var personality := PersonalityData.get_personality(entry.get("personality_id", "stoic"))
 		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 1)
 
 		var icon := TextureRect.new()
-		icon.texture = load(stats.sprite_ally)
-		icon.size = Vector2(24, 24)
+		icon.texture = load("res://assets/sprites/%s_idle_0.png" % stats.anim_prefix_ally)
+		icon.custom_minimum_size = Vector2(20, 20)
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		icon.tooltip_text = "%s (%s)" % [stats.display_name, personality.display_name]
 		col.add_child(icon)
 
+		var tag := ColorRect.new()
+		tag.color = personality.color
+		tag.custom_minimum_size = Vector2(20, 2)
+		col.add_child(tag)
+
 		var bar := ProgressBar.new()
-		bar.custom_minimum_size = Vector2(40, 6)
+		bar.custom_minimum_size = Vector2(20, 5)
 		bar.show_percentage = false
 		bar.max_value = entry.max_hp
 		bar.value = entry.hp

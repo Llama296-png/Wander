@@ -49,8 +49,19 @@ func _physics_process(delta: float) -> void:
 
 
 func _on_body_entered(body) -> void:
+	# Deferred: this fires from inside the physics server's query flush, and
+	# a killing blow here can cascade into spawning new physics bodies (a
+	# dropped item, a rescued ally) -- which Godot refuses to do until the
+	# current physics step finishes flushing. queue_free() itself is always
+	# safe to call immediately.
+	call_deferred("_apply_hit", body)
+	queue_free()
+
+
+func _apply_hit(body) -> void:
+	if not is_instance_valid(body):
+		return
 	if body.has_method("take_damage"):
 		body.take_damage(damage, global_position)
 	if on_hit_extra.is_valid():
 		on_hit_extra.call(body)
-	queue_free()

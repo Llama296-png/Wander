@@ -1,13 +1,17 @@
 extends Node2D
 ## A single procedurally-built room: floor, perimeter walls with door gaps,
-## enemies scaled to depth, and item/ally drops. Configure the exported-style
-## fields below before `add_child()`; geometry and enemies are built in
-## `_ready()`.
+## a themed set of decorative/blocking props, enemies scaled to depth, and
+## item/ally drops. Configure the exported-style fields below before
+## `add_child()`; geometry and enemies are built in `_ready()`. Rooms persist
+## once built -- Main shows/hides them rather than recreating them, so all
+## state here (enemy hp, dropped items, unlocked doors, ...) sticks around
+## exactly as the player left it.
 
 const Enemy = preload("res://scripts/entities/Enemy.gd")
 const Item = preload("res://scripts/entities/Item.gd")
 const RecruitPickup = preload("res://scripts/entities/RecruitPickup.gd")
 const ItemData = preload("res://scripts/data/ItemData.gd")
+const RoomThemeData = preload("res://scripts/data/RoomThemeData.gd")
 
 const TILE := 32
 const WALL_THICK := 32
@@ -24,6 +28,8 @@ var enemy_types: Array = ["slime"]
 var enemy_count: int = 2
 var depth: int = 1
 var difficulty_mult: float = 1.0
+var pacifist_mode: bool = false
+var theme_id: String = ""
 var recruit_callback: Callable = Callable()
 
 # --- runtime ---
@@ -32,15 +38,21 @@ var height_px: float
 var _alive_enemies: int = 0
 var _doors: Dictionary = {}
 var _recruit_spawned: bool = false
+var _theme: Dictionary
 
 
 func _ready() -> void:
 	width_px = width_tiles * TILE
 	height_px = height_tiles * TILE
+	if theme_id == "":
+		theme_id = RoomThemeData.random_id(GameManager.rng)
+	_theme = RoomThemeData.get_theme(theme_id)
+
 	_build_floor()
 	_build_walls_and_doors()
+	_place_props()
 	_spawn_enemies()
-	if _alive_enemies == 0:
+	if _alive_enemies == 0 or pacifist_mode:
 		_unlock_all()
 
 
@@ -48,9 +60,14 @@ func get_center() -> Vector2:
 	return Vector2(width_px / 2.0, height_px / 2.0)
 
 
+func set_active(active: bool) -> void:
+	visible = active
+	process_mode = Node.PROCESS_MODE_INHERIT if active else Node.PROCESS_MODE_DISABLED
+
+
 func _build_floor() -> void:
 	var floor_sprite := Sprite2D.new()
-	floor_sprite.texture = load("res://assets/sprites/tile_floor.png")
+	floor_sprite.texture = load(_theme.floor)
 	floor_sprite.centered = false
 	floor_sprite.region_enabled = true
 	floor_sprite.region_rect = Rect2(0, 0, width_tiles * 16, height_tiles * 16)
@@ -64,7 +81,7 @@ func _make_wall(rect_px: Rect2) -> void:
 	if rect_px.size.x <= 0.0 or rect_px.size.y <= 0.0:
 		return
 	var wall_sprite := Sprite2D.new()
-	wall_sprite.texture = load("res://assets/sprites/tile_wall.png")
+	wall_sprite.texture = load(_theme.wall)
 	wall_sprite.centered = false
 	wall_sprite.region_enabled = true
 	wall_sprite.region_rect = Rect2(0, 0, rect_px.size.x / 2.0, rect_px.size.y / 2.0)
@@ -157,7 +174,11 @@ func _on_door_body_entered(body: Node2D, side: String) -> void:
 		return
 	if _doors[side].locked:
 		return
-	door_entered.emit(side)
+	# Deferred: this fires from inside the physics server's query flush (a
+	# body_entered callback), and the room transition this triggers builds a
+	# whole new room's worth of physics bodies -- which Godot refuses to do
+	# until the current physics step finishes flushing.
+	call_deferred("emit_signal", "door_entered", side)
 
 
 func _unlock_all() -> void:
@@ -170,6 +191,57 @@ func _unlock_all() -> void:
 		if is_instance_valid(d.blocker):
 			d.blocker.queue_free()
 	_maybe_spawn_recruit()
+
+
+func _place_props() -> void:
+	var props: Array = _theme.get("props", [])
+	if props.is_empty():
+		return
+	var rng := GameManager.rng
+	var count := rng.randi_range(1, min(2, props.size()))
+	var shuffled: Array = props.duplicate()
+	shuffled.shuffle()
+	var center := get_center()
+	var margin := WALL_THICK + 24.0
+	var placed: Array = []
+	for i in range(count):
+		var tex := load(shuffled[i])
+		var half_size: Vector2 = Vector2(tex.get_size()) * 1.5
+		var pos := Vector2.ZERO
+		var ok := false
+		for attempt in range(12):
+			pos = Vector2(
+				rng.randf_range(margin + half_size.x, width_px - margin - half_size.x),
+				rng.randf_range(margin + half_size.y, height_px - margin - half_size.y)
+			)
+			if pos.distance_to(center) < 60.0:
+				continue
+			ok = true
+			for other in placed:
+				if pos.distance_to(other) < 70.0:
+					ok = false
+					break
+			if ok:
+				break
+		if not ok:
+			continue
+		placed.append(pos)
+
+		var sprite := Sprite2D.new()
+		sprite.texture = tex
+		sprite.scale = Vector2(2, 2)
+		sprite.position = pos
+		add_child(sprite)
+
+		var body := StaticBody2D.new()
+		body.position = pos
+		var shape := CollisionShape2D.new()
+		var rect_shape := RectangleShape2D.new()
+		rect_shape.size = Vector2(tex.get_size()) * 1.7
+		shape.shape = rect_shape
+		body.add_child(shape)
+		body.set_collision_layer_value(1, true)
+		add_child(body)
 
 
 func _spawn_enemies() -> void:

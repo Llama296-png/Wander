@@ -1,25 +1,38 @@
 extends Node
 ## Global game state: run progress, party roster, inventory and score.
-## Autoloaded as "GameManager".
+## Autoloaded as "GameManager". Persistent meta-progression (class XP/levels/
+## unlocks) lives in the separate SaveManager autoload.
+
+const PersonalityData = preload("res://scripts/data/PersonalityData.gd")
 
 signal depth_changed(depth: int)
 signal score_changed(score: int)
 signal inventory_changed
 signal party_changed
-signal game_over(depth_reached: int, score: int)
+signal game_over(depth_reached: int, score: int, xp_earned: int)
 
 var rng := RandomNumberGenerator.new()
 
-var depth: int = 1
 var player_class_id: String = "warrior"
 var score: int = 0
 
+## Depth of the room the player is currently standing in (Manhattan distance
+## from the starting room, 1-based). Can go back down when backtracking.
+var depth: int = 1
+## Deepest room depth reached this run -- monotonic, used for the game-over
+## summary and for the XP awarded at the end of the run.
+var max_depth_reached: int = 1
+
+var pacifist_mode: bool = false
+## How many allies to start the run with, chosen at class select (0-10).
+var desired_party_size: int = 0
+
 ## Ally data for the current run, keyed by a unique instance id.
-## Each entry: {id, class_id, hp, max_hp}
+## Each entry: {id, class_id, hp, max_hp, personality_id}
 var party: Array = []
 var _next_ally_id: int = 0
 
-const MAX_PARTY_SIZE := 2
+const MAX_PARTY_SIZE := 10
 const MAX_INVENTORY_SLOTS := 4
 
 ## Inventory slots: [{id: String, count: int}, ...]
@@ -37,6 +50,7 @@ func _ready() -> void:
 func start_new_run(class_id: String) -> void:
 	player_class_id = class_id
 	depth = 1
+	max_depth_reached = 1
 	score = 0
 	party.clear()
 	inventory.clear()
@@ -48,13 +62,14 @@ func start_new_run(class_id: String) -> void:
 	depth_changed.emit(depth)
 
 
-func advance_depth() -> void:
-	depth += 1
+func enter_room_depth(new_depth: int) -> void:
+	depth = new_depth
+	max_depth_reached = max(max_depth_reached, new_depth)
 	depth_changed.emit(depth)
 
 
-func get_difficulty_mult() -> float:
-	return 1.0 + float(depth - 1) * 0.18
+func difficulty_mult_for_depth(d: int) -> float:
+	return 1.0 + float(d - 1) * 0.18
 
 
 func add_score(amount: int) -> void:
@@ -63,7 +78,9 @@ func add_score(amount: int) -> void:
 
 
 func report_game_over() -> void:
-	game_over.emit(depth, score)
+	var xp_earned := max_depth_reached * 8 + int(score / 2.0)
+	SaveManager.add_run_xp(player_class_id, xp_earned)
+	game_over.emit(max_depth_reached, score, xp_earned)
 
 
 func can_recruit() -> bool:
@@ -76,6 +93,7 @@ func recruit_ally(class_id: String, stats: Dictionary) -> Dictionary:
 		"class_id": class_id,
 		"hp": stats.max_hp,
 		"max_hp": stats.max_hp,
+		"personality_id": PersonalityData.random_id(rng),
 	}
 	_next_ally_id += 1
 	party.append(entry)

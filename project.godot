@@ -19,6 +19,7 @@ config/icon="res://assets/sprites/icon.png"
 
 [autoload]
 
+SaveManager="*res://scripts/autoload/SaveManager.gd"
 GameManager="*res://scripts/autoload/GameManager.gd"
 
 [display]

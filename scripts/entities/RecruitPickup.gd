@@ -3,6 +3,7 @@ extends Area2D
 ## the party) spawns a real Ally entity via `on_recruited`.
 
 const ClassData = preload("res://scripts/data/ClassData.gd")
+const AnimSetup = preload("res://scripts/entities/AnimSetup.gd")
 
 var class_id: String = "warrior"
 var on_recruited: Callable = Callable()
@@ -12,10 +13,11 @@ var _base_y: float = 0.0
 
 
 func _ready() -> void:
-	var stats := ClassData.get_stats(class_id)
-	var sprite := Sprite2D.new()
-	sprite.texture = load(stats.sprite_ally)
-	sprite.scale = Vector2(1.75, 1.75)
+	var stats := ClassData.ally_stats(class_id)
+	var sprite := AnimatedSprite2D.new()
+	sprite.sprite_frames = AnimSetup.build(stats.anim_prefix)
+	sprite.play("idle")
+	sprite.scale = Vector2(1.3, 1.3)
 	add_child(sprite)
 
 	var glow := Sprite2D.new()
@@ -52,5 +54,9 @@ func _on_body_entered(body: Node2D) -> void:
 	if not GameManager.can_recruit():
 		return
 	if on_recruited.is_valid():
-		on_recruited.call(class_id)
+		# Deferred: we're inside the physics server's query flush right now,
+		# and recruiting spawns a whole new physics body (the Ally) --
+		# Godot refuses to set up collision state until the current physics
+		# step finishes flushing.
+		on_recruited.call_deferred(class_id)
 	queue_free()

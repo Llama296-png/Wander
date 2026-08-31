@@ -16,8 +16,8 @@ const CLASSES := {
 		"ability_cooldown": 4.0,
 		"ability_radius": 46.0,
 		"ability_damage": 24,
-		"sprite_player": "res://assets/sprites/player_warrior.png",
-		"sprite_ally": "res://assets/sprites/ally_warrior.png",
+		"anim_prefix_player": "player_warrior",
+		"anim_prefix_ally": "ally_warrior",
 		"color": Color(0.55, 0.62, 0.95),
 	},
 	"mage": {
@@ -33,8 +33,8 @@ const CLASSES := {
 		"ability_cooldown": 6.0,
 		"ability_radius": 70.0,
 		"ability_damage": 30,
-		"sprite_player": "res://assets/sprites/player_mage.png",
-		"sprite_ally": "res://assets/sprites/ally_mage.png",
+		"anim_prefix_player": "player_mage",
+		"anim_prefix_ally": "ally_mage",
 		"color": Color(0.75, 0.4, 0.95),
 	},
 	"priest": {
@@ -50,21 +50,24 @@ const CLASSES := {
 		"ability_cooldown": 8.0,
 		"ability_radius": 90.0,
 		"ability_heal": 35,
-		"sprite_player": "res://assets/sprites/player_priest.png",
-		"sprite_ally": "res://assets/sprites/ally_priest.png",
+		"anim_prefix_player": "player_priest",
+		"anim_prefix_ally": "ally_priest",
 		"color": Color(0.95, 0.85, 0.4),
 	},
 }
 
 
 static func get_stats(class_id: String) -> Dictionary:
-	return CLASSES.get(class_id, CLASSES["warrior"])
+	var base: Dictionary = CLASSES.get(class_id, CLASSES["warrior"]).duplicate(true)
+	base.anim_prefix = base.anim_prefix_player
+	return base
 
 
 static func ally_stats(class_id: String) -> Dictionary:
 	# Allies are a slightly weaker copy of the player-facing stats so a full
 	# party doesn't trivialize fights.
-	var base: Dictionary = get_stats(class_id).duplicate(true)
+	var base := get_stats(class_id)
 	base.max_hp = int(base.max_hp * 0.7)
 	base.damage = int(base.damage * 0.7)
+	base.anim_prefix = base.anim_prefix_ally
 	return base
