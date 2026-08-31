@@ -68,7 +68,7 @@ func _physics_process(delta: float) -> void:
 	if class_id == "priest" and _ability_cd <= 0.0 and _try_heal():
 		return
 
-	var target := _find_nearest_enemy()
+	var target = _find_nearest_enemy()
 	if target:
 		var to_target: Vector2 = target.global_position - global_position
 		var dist := to_target.length()
